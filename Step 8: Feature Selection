@@ -22,7 +22,7 @@ if continue_columns:
         st.pyplot(fig)
 
         corr, _ = pearsonr(data_cleaned[col], data_cleaned['charges'])
-        st.write("## Pearson Correlation between '{col}' and 'charges': **{corr:.2f}**")
+        st.write(f"Pearson correlation between `{col}` and `charges`: **{corr:.2f}**")
 else:
     st.write("No continous predictors found.")
 

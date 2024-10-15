@@ -1,0 +1,74 @@
+#Step 8 Feature Selection
+st.write("### Step 8: Feature Selection - Correlation Analysis")
+
+continue_columns = data_cleaned.select_dtypes(include=['float64', 'int64']).columns.tolist()
+categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tolist()
+
+if 'charges' in continue_columns:
+    continue_columns.remove('charges')
+
+st.write("### Continuous Predictors vs Target Variable")
+
+if continue_columns:
+    for col in continue_columns:
+        st.write(f"### {col} vs charges")
+
+        #Scatter
+        fig, ax = plt.subplots()
+        ax.scatter(data_cleaned[col], data_cleaned['charges'], alpha=0.7)
+        ax.set_title(f"{col} vs charges")
+        ax.set_xlabel(col)
+        ax.set_ylabel('charges')
+        st.pyplot(fig)
+
+        corr, _ = pearsonr(data_cleaned[col], data_cleaned['charges'])
+        st.write("## Pearson Correlation between '{col}' and 'charges': **{corr:.2f}**")
+else:
+    st.write("No continous predictors found.")
+
+st.write('### Categorical Predictors vs Target Variable (Box)')
+
+if categorical_columns:
+    for col in categorical_columns:
+        st.write(f"### {col} vs charges")
+
+        #box
+        fig, ax = plt.subplots()
+        sns.boxplot(x=data_cleaned[col], y=data_cleaned['charges'], ax=ax)
+        ax.set_title(f'{col} vs charges')
+        ax.set_xlabel(col)
+        ax.set_ylabel('charges')
+        st.pyplot(fig)
+else:
+    st.write("No categorical predictors found.")
+
+#correlation matrix
+st.write("### Correlation Matrix for Continuous Variables")
+if continue_columns:
+    continue_corr_data = data_cleaned[continue_columns + ['charges']]
+    correlation_matrix = continue_corr_data.corr()
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', ax=ax)
+    st.pyplot(fig)
+
+    st.write("## Correlation Matrix:")
+    st.dataframe(correlation_matrix, use_container_width=True)
+
+    target_correlation = correlation_matrix['charges'].drop('charges')
+
+    st.write(f"## Correlation of Continuous Target Variable:")
+    st.dataframe(target_correlation, use_container_width=True)
+
+    strong_corr = target_correlation[target_correlation.abs() >= 0.7]
+    mod_corr = target_correlation[target_correlation.abs() >= 0.3] & (target_correlation.abs() <= 0.5)
+    weak_corr = target_correlation[target_correlation.abs() < 0.3]
+
+    st.write("## Strong Correlation:")
+    st.dataframe(strong_corr, use_container_width=True)
+    st.write("## Moderarte Correlation:")
+    st.dataframe(mod_corr, use_container_width=True)
+    st.write("## Weak Correlation:")
+    st.dataframe(weak_corr, use_container_width=True)
+else:
+    st.write("No continuous columns availble for correlation")

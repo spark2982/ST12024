@@ -1,5 +1,5 @@
-#Step 8 Feature Selection
-st.write("### Step 8: Feature Selection - Correlation Analysis")
+# Step 8 Feature Selection
+st.write("## Step 8: Feature Selection - Correlation Analysis")
 
 continue_columns = data_cleaned.select_dtypes(include=['float64', 'int64']).columns.tolist()
 categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tolist()

@@ -1,0 +1,41 @@
+# Step 9 Statistical Feature Selection
+st.write("## Step 9: Statistical Feature Selection (ANOVA Test)")
+
+categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tolist()
+
+if categorical_columns:
+    select_categorical = st.multiselect("Select categorical variables", categorical_columns)
+
+    target = 'charges'
+    if pd.api.types.is_numeric_dtype(data_cleaned[target]):
+        anova_results = []
+
+        for cat_col in select_categorical:
+            anova_group = [group for name, group in data_cleaned.groupby(cat_col)[target]]
+            f_val, p_val = stats.f_oneway(*anova_group)
+
+            anova_results.append({"Categorical Variable": cat_col, "F-Value": f_val, "P-Value": p_val})
+
+        anova_df = pd.DataFrame(anova_results)
+
+        st.write(f"## ANOVA Results")
+        st.write("Table shows F-values and P-values for each categorical variable")
+        st.dataframe(anova_df, use_container_width=True)
+
+        significant_vars = anova_df[anova_df['P-Value'] < 0.05]
+        st.write("### Significant Variables")
+        if not significant_vars.empty:
+            st.dataframe(significant_vars, use_container_width=True)
+        else:
+            st.write("No significant variables")
+
+        st.write("## Categorical Variables vs Target Variable")
+        for cat_col in select_categorical:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sns.boxplot(x=cat_col, y=target, data=data_cleaned, ax=ax)
+            ax.set_title(f"{cat_col} vs {target}")
+            st.pyplot(fig)
+    else:
+        st.write("Target Variable must be continuous for analysis")
+else:
+    st.write("no categorical variables for analysis")

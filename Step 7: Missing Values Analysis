@@ -1,2 +1,18 @@
 # Step 7: Missing Values Analysis
 st.write("## Step 7: Missing Values Analysis")
+
+# Show missing values for each column
+missing_values = data_cleaned.isnull().sum()
+missing_values = missing_values[missing_values > 0]  # Filter columns with missing values
+st.write("## Columns with missing values: ")
+st.dataframe(missing_values, use_container_width=True)
+
+
+if not missing_values.empty:
+    st.write("### Options for handling missing values:")
+
+
+
+
+else:
+    st.write("No missing values detected in the dataset.")

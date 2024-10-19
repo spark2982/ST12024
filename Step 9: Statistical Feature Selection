@@ -23,7 +23,7 @@ if categorical_columns:
         st.dataframe(anova_df, use_container_width=True)
 
         significant_vars = anova_df[anova_df['P-Value'] < 0.05]
-        st.write("### Significant Variables")
+        st.write("## Significant Variables")
         if not significant_vars.empty:
             st.dataframe(significant_vars, use_container_width=True)
         else:

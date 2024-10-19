@@ -7,11 +7,11 @@ categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tol
 if 'charges' in continue_columns:
     continue_columns.remove('charges')
 
-st.write("### Continuous Predictors vs Target Variable")
+st.write("## Continuous Predictors vs Target Variable")
 
 if continue_columns:
     for col in continue_columns:
-        st.write(f"### {col} vs charges")
+        st.write(f"## {col} vs charges")
 
         #Scatter
         fig, ax = plt.subplots()
@@ -26,11 +26,11 @@ if continue_columns:
 else:
     st.write("No continous predictors found.")
 
-st.write('### Categorical Predictors vs Target Variable (Box)')
+st.write('## Categorical Predictors vs Target Variable (Box)')
 
 if categorical_columns:
     for col in categorical_columns:
-        st.write(f"### {col} vs charges")
+        st.write(f"## {col} vs charges")
 
         #box
         fig, ax = plt.subplots()
@@ -43,7 +43,7 @@ else:
     st.write("No categorical predictors found.")
 
 #correlation matrix
-st.write("### Correlation Matrix for Continuous Variables")
+st.write("## Correlation Matrix for Continuous Variables")
 if continue_columns:
     continue_corr_data = data_cleaned[continue_columns + ['charges']]
     correlation_matrix = continue_corr_data.corr()

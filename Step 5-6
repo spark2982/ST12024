@@ -8,17 +8,17 @@ for col in categorical_cols:
     sns.countplot(x=data_cleaned[col], ax=ax)
     ax.set_title(f"Distribution of {col}")
     ax.set_xlabel(col)
-    ax.set_ylabel('Count')
+    ax.set_ylabel("Count")
     st.pyplot(fig)
 
 # Visualizing Continuous Variables using Histograms
 st.write("## Continuous Variables: Histograms")
 for col in continuous_cols:
     fig, ax = plt.subplots()
-    ax.hist(data_cleaned[col], bins=30, edgecolor='k', alpha=0.7)
+    ax.hist(data_cleaned[col], bins=30, alpha=0.7)
     ax.set_title(f"Distribution of {col}")
     ax.set_xlabel(col)
-    ax.set_ylabel('Frequency')
+    ax.set_ylabel("Frequency")
     st.pyplot(fig)
 
 # Step 6: Outlier Analysis

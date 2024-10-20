@@ -122,18 +122,44 @@ if uploaded_files is not None:
     if uploaded_files is not None:
         st.write("## Step 7: Missing Values Analysis")
 
+    # Identifying continuous and categorical columns
+    continuous_cols = data_cleaned.select_dtypes(include=['float64', 'int64']).columns
+    categorical_cols = data_cleaned.select_dtypes(include=['object']).columns
+
 # Show missing values for each column
     missing_values = data_cleaned.isnull().sum()
     missing_values = missing_values[missing_values > 0]  # Filter columns with missing values
     st.write("## Columns with missing values: ")
     st.dataframe(missing_values, use_container_width=True)
 
-
     if not missing_values.empty:
         st.write("### Options for handling missing values:")
 
+ # Option to delete rows with missing values
+    if st.checkbox("Delete rows with missing values"):
+        data_cleaned = data_cleaned.dropna()
+        st.write("Rows with missing values have been deleted.")
+        st.dataframe(data_cleaned.sample(5), use_container_width=True)'
+
+    # Option to impute missing values for continuous variables (using median)
+    if st.checkbox("Impute missing values for continuous variables with median"):
+        for col in continuous_cols:
+            if col in missing_values.index:
+                data_cleaned[col].fillna(data_cleaned[col].median(), inplace=True)
+        st.write("Missing values in continuous variables have been imputed with median.")
+        st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+    # Option to impute missing values for categorical variables (using mode)
+    if st.checkbox("Impute missing values for categorical variables with mode"):
+        for col in categorical_cols:
+            if col in missing_values.index:
+                data_cleaned[col].fillna(data_cleaned[col].mode()[0], inplace=True)
+        st.write("Missing values in categorical variables have been imputed with mode.")
+        st.dataframe(data_cleaned.sample(5), use_container_width=True)
     else:
         st.write("No missing values detected in the dataset.")
+else:
+    st.write("No missing values detected in the dataset.")
 
 # Step 8 Feature Selection
     st.write("## Step 8: Feature Selection - Correlation Analysis")

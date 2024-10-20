@@ -1,0 +1,54 @@
+# Step 5: Visual Exploratory Data Analysis (EDA)
+st.write("## Step 5: Visual Exploratory Data Analysis (EDA)")
+
+# Visualizing Categorical Variables using Bar Plots
+st.write("## Categorical Variables: Bar Plots")
+for col in categorical_cols:
+    fig, ax = plt.subplots()
+    sns.countplot(x=data_cleaned[col], ax=ax)
+    ax.set_title(f"Distribution of {col}")
+    ax.set_xlabel(col)
+    ax.set_ylabel('Count')
+    st.pyplot(fig)
+
+# Visualizing Continuous Variables using Histograms
+st.write("## Continuous Variables: Histograms")
+for col in continuous_cols:
+    fig, ax = plt.subplots()
+    ax.hist(data_cleaned[col], bins=30, edgecolor='k', alpha=0.7)
+    ax.set_title(f"Distribution of {col}")
+    ax.set_xlabel(col)
+    ax.set_ylabel('Frequency')
+    st.pyplot(fig)
+
+# Step 6: Outlier Analysis
+st.write("## Step 6: Outlier Analysis")
+
+# Identifying outliers using IQR (Interquartile Range) for continuous variables
+def detect_outliers_iqr(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    return df[(df[column] < lower_bound) | (df[column] > upper_bound)]
+
+# Remove outliers option
+remove_outliers = st.checkbox("Remove outliers for continuous variables")
+
+if remove_outliers:
+    for col in continuous_cols:
+        outliers = detect_outliers_iqr(data_cleaned, col)
+        if not outliers.empty:
+            st.write(f"Outliers detected in {col}:")
+            st.dataframe(outliers, use_container_width=True)
+            # Remove outliers
+            data_cleaned = data_cleaned[~((data_cleaned[col] < outliers[col].min()) | (data_cleaned[col] > outliers[col].max()))]
+            st.write(f"Outliers removed from {col}.")
+
+else:
+    st.write("No outliers have been removed.")
+
+# Show cleaned dataset
+st.write("## Data after Outlier Analysis")
+st.dataframe(data_cleaned.sample(5), use_container_width=True)

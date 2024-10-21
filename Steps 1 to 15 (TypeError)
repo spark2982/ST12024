@@ -1,0 +1,479 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from scipy.stats import pearsonr, stats, f_oneway
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import joblib
+
+try:
+    from xgboost import XGBRegressor
+    xgboost_available = True
+except ImportError:
+    xgboost_available = False
+
+# Caching
+@st.cache_data
+def scale_data(X_train, X_test):
+    scaler = StandardScaler()
+    X_train_scale = scaler.fit_transform(X_train)
+    X_test_scale = scaler.transform(X_test)
+    return scaler, X_train_scale, X_test_scale
+
+@st.cache_resource
+def train_models(X_train, y_train):
+    models = {
+        "LinearRegression": LinearRegression(),
+        "KNeighborsRegressor": KNeighborsRegressor(),
+        "DecisionTreeRegressor": DecisionTreeRegressor(),
+    }
+
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+
+    return models
+
+# Data cleaning
+def clean_dataset(data):
+    for col in data.select_dtypes(include=['object']).columns:
+        data[col] = data[col].apply(lambda x: pd.to_numeric(x, errors='ignore') if isinstance(x, str) else x)
+
+    for col in data.select_dtypes(include=['object']).columns:
+        try:
+            data[col] = pd.to_datetime(data[col], errors='ignore')
+        except:
+            pass
+
+    data = data.infer_objects()
+    return data
+
+#Dataset Upload
+st.sidebar.title("Upload Dataset")
+uploaded_files = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+
+if uploaded_files is not None:
+    # Read and clean the uploaded dataset
+    data = pd.read_csv(uploaded_files)
+    data_cleaned = data.drop_duplicates()
+
+    st.title("Medical Insurance Dataset Analysis")
+
+    # Step 1
+    st.write("### Sample Data from the Dataset")
+    st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+
+    if "Unnamed: 0" in data_cleaned.columns:
+        data_cleaned = data_cleaned.drop(columns=["Unnamed: 0"])
+        st.write("Dropped 'Unnamed: 0' column from the dataset.")
+        st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+
+    st.write("### Dataset Information")
+    st.write(f"### Shape: `{data_cleaned.shape}`")
+    st.write("Columns in the dataset:", data_cleaned.columns.tolist())
+
+    # Step 2 Problem Definition
+    target = 'charges'
+    st.write(f"### Target Variable: `{target}`")
+
+    # Step 3
+    fig, ax = plt.subplots()
+    ax.hist(data_cleaned[target], bins=30, edgecolor='k', alpha=0.7)
+    ax.set_title(f"Distribution of {target}")
+    ax.set_xlabel(target)
+    ax.set_ylabel('Frequency')
+    st.pyplot(fig)
+
+    # Step 4
+    st.write("## Step 4: Data Exploration")
+    col1, col2 = st.columns(2)
+
+    # Step 5: Visual Exploratory Data Analysis (EDA)
+    st.write("## Step 5: Visual Exploratory Data Analysis (EDA)")
+
+    # Visualizing Categorical Variables using Bar Plots
+    st.write("## Categorical Variables: Bar Plots")
+
+    continue_columns = data_cleaned.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tolist()
+
+    for col in categorical_columns:
+        fig, ax = plt.subplots()
+        sns.countplot(x=data_cleaned[col], ax=ax)
+        ax.set_title(f"Distribution of {col}")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Count")
+        st.pyplot(fig)
+
+
+
+    # Visualizing Continuous Variables using Histograms
+    st.write("## Continuous Variables: Histograms")
+    for col in continue_columns:
+        fig, ax = plt.subplots()
+        ax.hist(data_cleaned[col], bins=30, alpha=0.7)
+        ax.set_title(f"Distribution of {col}")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Frequency")
+        st.pyplot(fig)
+
+    # Step 6: Outlier Analysis
+    st.write("## Step 6: Outlier Analysis")
+
+
+    # Identifying outliers using IQR (Interquartile Range) for continuous variables
+    def detect_outliers_iqr(df, column):
+        Q1 = df[column].quantile(0.25)
+        Q3 = df[column].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        return df[(df[column] < lower_bound) | (df[column] > upper_bound)]
+
+
+    # Remove outliers option
+    remove_outliers = st.checkbox("Remove outliers for continuous variables")
+
+    if remove_outliers:
+        for col in continue_columns:
+            outliers = detect_outliers_iqr(data_cleaned, col)
+            if not outliers.empty:
+                st.write(f"Outliers detected in {col}:")
+                st.dataframe(outliers, use_container_width=True)
+                # Remove outliers
+                data_cleaned = data_cleaned[
+                    ~((data_cleaned[col] < outliers[col].min()) | (data_cleaned[col] > outliers[col].max()))]
+                st.write(f"Outliers removed from {col}.")
+
+    else:
+        st.write("No outliers have been removed.")
+
+    # Show cleaned dataset
+    st.write("## Data after Outlier Analysis")
+    st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+    with col1:
+        st.write("### Data Types:")
+        dtype_df = pd.DataFrame(data_cleaned.dtypes, columns=["Data Type"]).reset_index().rename(
+            columns={"index": "Column Name"})
+        st.dataframe(dtype_df, use_container_width=True)
+
+
+    with col2:
+        st.write("### Summary Statistics:")
+        st.dataframe(data_cleaned.describe(), use_container_width=True)
+
+    # Pairplot
+    numeric_cols = data_cleaned.select_dtypes(include=['float64', 'int64']).columns
+    if len(numeric_cols) > 1:
+        st.write("## Pairplot of Numeric Variables")
+        sns.pairplot(data_cleaned[numeric_cols])
+        st.pyplot(plt.gcf())
+    else:
+        st.write("Not enough numeric variables for a pairplot.")
+
+
+# Step 7: Missing Values Analysis
+    if uploaded_files is not None:
+        st.write("## Step 7: Missing Values Analysis")
+
+# Show missing values for each column
+    missing_values = data_cleaned.isnull().sum()
+    missing_values = missing_values[missing_values > 0]  # Filter columns with missing values
+    st.write("## Columns with missing values: ")
+    st.dataframe(missing_values, use_container_width=True)
+    if not missing_values.empty:
+        st.write("## Options for handling missing values:")
+
+    else:
+        st.write("No missing values detected in the dataset.")
+
+# Step 8 Feature Selection
+    st.write("## Step 8: Feature Selection - Correlation Analysis")
+
+    if 'charges' in continue_columns:
+        continue_columns.remove('charges')
+
+    st.write("## Continuous Predictors vs Target Variable")
+
+    if continue_columns:
+        for col in continue_columns:
+            st.write(f"## {col} vs charges")
+
+        #Scatter
+            fig, ax = plt.subplots()
+            ax.scatter(data_cleaned[col], data_cleaned['charges'], alpha=0.7)
+            ax.set_title(f"{col} vs charges")
+            ax.set_xlabel(col)
+            ax.set_ylabel('charges')
+            st.pyplot(fig)
+
+            corr, _ = pearsonr(data_cleaned[col], data_cleaned['charges'])
+            st.write(f"Pearson correlation between `{col}` and `charges`: **{corr:.2f}**")
+    else:
+        st.write("No continous predictors found.")
+
+    st.write('## Categorical Predictors vs Target Variable (Box)')
+
+    if categorical_columns:
+        for col in categorical_columns:
+            st.write(f"## {col} vs charges")
+
+        #box
+            fig, ax = plt.subplots()
+            sns.boxplot(x=data_cleaned[col], y=data_cleaned['charges'], ax=ax)
+            ax.set_title(f'{col} vs charges')
+            ax.set_xlabel(col)
+            ax.set_ylabel('charges')
+            st.pyplot(fig)
+    else:
+        st.write("No categorical predictors found.")
+
+#correlation matrix
+    st.write("## Correlation Matrix for Continuous Variables")
+    if continue_columns:
+        continue_corr_data = data_cleaned[continue_columns + ['charges']]
+        correlation_matrix = continue_corr_data.corr()
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', ax=ax)
+        st.pyplot(fig)
+
+        st.write("## Correlation Matrix:")
+        st.dataframe(correlation_matrix, use_container_width=True)
+
+        target_correlation = correlation_matrix['charges'].drop('charges')
+
+        st.write(f"## Correlation of Continuous Target Variable:")
+        st.dataframe(target_correlation, use_container_width=True)
+
+        strong_corr = target_correlation[target_correlation.abs() >= 0.7]
+        mod_corr = target_correlation[target_correlation.abs() >= 0.3] & (target_correlation.abs() <= 0.5)
+        weak_corr = target_correlation[target_correlation.abs() < 0.3]
+
+        st.write("## Strong Correlation:")
+        st.dataframe(strong_corr, use_container_width=True)
+        st.write("## Moderarte Correlation:")
+        st.dataframe(mod_corr, use_container_width=True)
+        st.write("## Weak Correlation:")
+        st.dataframe(weak_corr, use_container_width=True)
+    else:
+        st.write("No continuous columns availble for correlation")
+
+# Step 9 (ANOVA Test)
+    st.write("## Step 9: Statistical Feature Selection (ANOVA Test)")
+    if categorical_columns:
+        select_categorical = st.multiselect("Select categorical variables", categorical_columns)
+        target = 'charges'
+        if pd.api.types.is_numeric_dtype(data_cleaned[target]):
+            anova_results = []
+            for cat_col in select_categorical:
+                anova_group = [group for name, group in data_cleaned.groupby(cat_col)[target]]
+                f_val, p_val = stats.f_oneway(*anova_group)
+                anova_results.append({"Categorical Variable": cat_col, "F-Value": f_val, "P-Value": p_val})
+
+            anova_df = pd.DataFrame(anova_results)
+            st.write("### ANOVA Results")
+            st.write("Table shows F-values and P-values for each categorical variable")
+            st.dataframe(anova_df, use_container_width=True)
+
+        # Filter significant variables
+            if 'P-Value' in anova_df.columns:
+                significant_vars = anova_df[anova_df['P-Value'] < 0.05]
+                st.write("### Significant Variables (p < 0.05)")
+                if not significant_vars.empty:
+                    st.dataframe(significant_vars, use_container_width=True)
+                else:
+                    st.write("No significant variables")
+
+                st.write("## Categorical Variables vs Target Variable")
+                for cat_col in select_categorical:
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    sns.boxplot(x=cat_col, y=target, data=data_cleaned, ax=ax)
+                    ax.set_title(f"{cat_col} vs {target}")
+                    st.pyplot(fig)
+            else:
+                st.write("Target Variable must be continuous for analysis")
+        else:
+            st.write("no categorical variables for analysis")
+
+# Step 10 Final Predictors
+    st.write("## Step 10: Final Predictor Selections")
+
+    all_columns = data_cleaned.columns.tolist()
+    selected_features = st.multiselect("Select Variables", all_columns)
+
+    target = 'charges'
+    st.write("## Target Variable: `charges`")
+
+    if selected_features:
+        st.write("## Selcted Features:", selected_features)
+
+    #Step 11 data conversion
+        st.write("## Coversion to Numeric Values")
+        X = data_cleaned[selected_features]
+        y = data_cleaned[target]
+        X = pd.get_dummies(X, drop_first=True)
+
+        st.write("## Transformed Features")
+        st.dataframe(X.head())
+
+    #Step 12 Data Split / Standardization of Data
+        st.write("## Step 12: Train/Test Data and Standardization/Normalization")
+
+        test_size = st.slider("Select Test Size in Percent", min_value=0.1, max_value=0.5, value=0.2, step=0.05)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+
+        scale_data_flag = st.checkbox("Apply Standardization")
+
+        if scale_data_flag:
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            st.write(f'Train Set Shape: {X_train_scaled.shape}')
+            st.write(f'Test Set Shape: {X_test_scaled.shape}')
+            # Step 13 Regression Algorithms
+            st.write("## Step 13: Multiple Regression Algorithms")
+
+            algorithm = {
+                "LinearRegression": LinearRegression(),
+                "DecisionTreeRegressor": DecisionTreeRegressor(),
+                "KNNRegressor": KNeighborsRegressor(),
+                "AdaBoostRegressor": AdaBoostRegressor(n_estimators=50),
+                "RandomForestRegressor": RandomForestRegressor(n_estimators=100),
+            }
+
+            if xgboost_available:
+                algorithm["XGBoostRegressor"] = XGBoostRegressor()
+
+            model_perform = {}
+
+            for name, model in algorithm.items():
+                model.fit(X_train_scaled, y_train)
+                y_pred = model.predict(X_test_scaled)
+
+                mse = mean_squared_error(y_test, y_pred)
+                r2 = r2_score(y_test, y_pred)
+                mae = mean_absolute_error(y_test, y_pred)
+
+                model_perform[name] = {"MSE": mse, "R2": r2, "MAE": mae}
+            else:
+                X_train_scaled, X_test_scaled = X_train, X_test
+                st.write(f'Train Set Shape: {X_train.shape}, Test Set Shape: {X_test.shape}')
+
+            perform_df = pd.DataFrame(model_perform).T
+
+            st.write("## Model Performance")
+            st.dataframe(perform_df, use_container_width=True)
+
+            # Step 14 Best Model
+            st.write("## Step 14: Selection of Best Model")
+
+            best_model_name = perform_df["R2"].idxmax()
+            best_r2_score = perform_df["R2"].max()
+
+            st.write(f"## Best Model Selected: {best_model_name}")
+            st.write(f"## Best R2 Score: {best_r2_score:.2f}")
+
+            st.write("## Visual Model Performance Comparison")
+
+            model_names = perform_df.index
+            mse_value = perform_df["MSE"]
+            r2_value = perform_df["R2"]
+            mae_value = perform_df["MAE"]
+
+            fig, ax = plt.subplots(3, 1, figsize=(10, 8))
+
+            ax[0].bar(model_names, mse_value, color='green')
+            ax[0].set_title('(MSE) Mean Squared Error')
+            ax[0].set_ylabel('MSE')
+
+            ax[1].bar(model_names, r2_value, color='blue')
+            ax[1].set_title('R2 Score')
+            ax[1].set_ylabel('R2')
+
+            ax[2].bar(model_names, mae_value, color='red')
+            ax[2].set_title('(MAE) Mean Absolute Error')
+            ax[2].set_ylabel('MAE')
+
+            plt.tight_layout()
+            st.pyplot(fig)
+
+            # Step 15 Deployment of Best Model Production
+            st.write("## Step 15: Best Model Deployment for Production")
+
+            best_model = algorithm[best_model_name]
+
+            X_full = pd.get_dummies(X, drop_first=True)
+            X_full_scaled = scaler.fit_transform(X_full)
+            y_full = y
+
+            best_model.fit(X_full_scaled, y_full)
+
+            model_filename = "optimal_model.pkl"
+            joblib.dump(best_model, model_filename)
+            st.write(f"Best model `{best_model_name}` has been retrained and saved as `{model_filename}`")
+
+            st.write("## Model Deployment")
+
+            loaded_model = joblib.load(model_filename)
+
+            st.write("## Provide Input Values")
+
+            user_input = {}
+            for feature in selected_features:
+                user_input[feature] = st.number_input(f"Enter value for {feature}",
+                                                      value=float(data_cleaned[feature].mean()))
+
+            if st.button("Predict"):
+                user_input_df = pd.DataFrame([user_input])
+                user_input_scale = scaler.transform(user_input_df)
+                predicted_val = loaded_model.predict(user_input_scale)
+
+                st.write(f"Predicted {target}: {predicted_val[0]:.2f}")
+                st.write("## Visulise Prediction and Input Feature Values")
+
+                fig, ax = plt.subplots()
+
+                feature_name = list(user_input.keys())
+                feature_val = list(user_input.values())
+
+                ax.bar(['Predicted' + target], [predicted_val[0]], color='green', label='Predicted Value')
+
+                ax.set_xlabel("Features")
+                ax.set_title(f"Input Features and Predicted {target}")
+                ax.legend()
+
+                st.pyplot(fig)
+
+                fig, ax = plt.subplots(figsize=(10, 8))
+
+                copy_feat_name = feature_name.copy()
+                copy_feat_val = feature_val.copy()
+
+                copy_feat_name.append(f"Predicted {target}")
+                copy_feat_val.append(predicted_val[0])
+
+                ax.plot(copy_feat_name, copy_feat_val, marker='o', linestyle='-', color='blue',
+                        label='Feature and Predicted Value')
+
+                ax.set_xlabel("Features and Prediction")
+                ax.set_ylabel("Values")
+                ax.set_title(f"Input Features and Predicted {target}")
+                ax.grid(True)
+
+                for i, txt in enumerate(copy_feat_val):
+                    ax.annotate(f'{txt:.2f}', xy=((copy_feat_name[i]),(copy_feat_val[i])), textcoords='offset points',
+                                xytext=(0, 10), ha='center')
+
+                st.pyplot(fig)
+    else:
+            st.write("Please select predictors")

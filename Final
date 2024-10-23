@@ -157,6 +157,7 @@ if uploaded_files is not None:
     st.write("## Data after Outlier Analysis")
     st.dataframe(data_cleaned.sample(5), use_container_width=True)
 
+
     with col1:
         st.write("### Data Types:")
         dtype_df = pd.DataFrame(data_cleaned.dtypes, columns=["Data Type"]).reset_index().rename(
@@ -176,7 +177,6 @@ if uploaded_files is not None:
         st.pyplot(plt.gcf())
     else:
         st.write("Not enough numeric variables for a pairplot.")
-
 
 # Step 7: Missing Values Analysis
     if uploaded_files is not None:
@@ -339,6 +339,8 @@ if uploaded_files is not None:
             X_test_scaled = scaler.transform(X_test)
             st.write(f'Train Set Shape: {X_train_scaled.shape}')
             st.write(f'Test Set Shape: {X_test_scaled.shape}')
+            X_full = pd.get_dummies(X, drop_first=True)
+
             # Step 13 Regression Algorithms
             st.write("## Step 13: Multiple Regression Algorithms")
 
@@ -406,7 +408,7 @@ if uploaded_files is not None:
             plt.tight_layout()
             st.pyplot(fig)
 
-            # Step 15 Deployment of Best Model Production
+            # Step 15: Deployment of the Best Model
             st.write("## Step 15: Best Model Deployment for Production")
 
             best_model = algorithm[best_model_name]
@@ -421,58 +423,72 @@ if uploaded_files is not None:
             joblib.dump(best_model, model_filename)
             st.write(f"Best model `{best_model_name}` has been retrained and saved as `{model_filename}`")
 
-            st.write("## Model Deployment")
-
+            # Load the saved
             loaded_model = joblib.load(model_filename)
 
-            st.write("## Provide Input Values")
+            st.write("## Model Deployment: Provide Input Values")
+
+            # Separate numeric and categorical
+            categorical_columns = ['sex', 'smoker', 'region']  # Adjust based on your dataset
+            numeric_columns = [col for col in selected_features if col not in categorical_columns]
 
             user_input = {}
-            for feature in selected_features:
-                user_input[feature] = st.text_input(f"Enter value for {feature}",
-                                                    value=data_cleaned[feature].mean)
+
+            for feature in numeric_columns:
+                user_input[feature] = st.number_input(f"Enter value for {feature}",
+                                                      value=float(data_cleaned[feature].mean()))
+
+            user_input['sex'] = st.selectbox("Select Sex", options=['male', 'female'])
+            user_input['smoker'] = st.selectbox("Are you a smoker?", options=['yes', 'no'])
+            user_input['region'] = st.selectbox("Select Region", options=data_cleaned['region'].unique())
 
             if st.button("Predict"):
                 user_input_df = pd.DataFrame([user_input])
-                user_input_scale = scaler.transform(user_input_df)
-                predicted_val = loaded_model.predict(user_input_scale)
+                user_input_df['sex_male'] = 1 if user_input['sex'] == 'male' else 0
+                user_input_df['smoker_yes'] = 1 if user_input['smoker'] == 'yes' else 0
+                user_input_df = pd.get_dummies(user_input_df, columns=['region'], drop_first=True)
+
+                user_input_df = user_input_df.reindex(columns=X_full.columns, fill_value=0)
+                user_input_scaled = scaler.transform(user_input_df)
+                predicted_val = loaded_model.predict(user_input_scaled)
 
                 st.write(f"Predicted {target}: {predicted_val[0]:.2f}")
-                st.write("## Visulise Prediction and Input Feature Values")
+
+                st.write("## Visualising Prediction and Input Feature Values")
 
                 fig, ax = plt.subplots()
 
-                feature_name = list(user_input.keys())
-                feature_val = list(user_input.values())
+                # Get feature names
+                feature_names = list(user_input.keys())
+                feature_values = list(user_input.values())
 
-                ax.bar(['Predicted' + target], [predicted_val[0]], color='green', label='Predicted Value')
+                numeric_feature_names = [f for f in feature_names if f in numeric_columns]
+                numeric_feature_values = [user_input[f] for f in numeric_feature_names]
+
+                ax.bar(numeric_feature_names, numeric_feature_values, color='lightblue', label='Feature Values')
+
+                ax.bar(['Predicted ' + target], [predicted_val[0]], color='green', label='Predicted Value')
 
                 ax.set_xlabel("Features")
-                ax.set_title(f"Input Features and Predicted {target}")
+                ax.set_title(f"Input Numeric Features and Predicted {target}")
                 ax.legend()
 
+                # Display the bar plot
                 st.pyplot(fig)
 
                 fig, ax = plt.subplots(figsize=(10, 8))
 
-                copy_feat_name = feature_name.copy()
-                copy_feat_val = feature_val.copy()
+                ax.plot(numeric_feature_names + [f"Predicted {target}"],
+                        numeric_feature_values + [predicted_val[0]],
+                        marker='o', linestyle='-', color='blue', label='Feature and Predicted Values')
 
-                copy_feat_name.append(f"Predicted {target}")
-                copy_feat_val.append(predicted_val[0])
-
-                ax.plot(copy_feat_name, copy_feat_val, marker='o', linestyle='-', color='blue',
-                        label='Feature and Predicted Value')
-
-                ax.set_xlabel("Features and Prediction")
+                ax.set_xlabel("Numeric Features and Prediction")
                 ax.set_ylabel("Values")
-                ax.set_title(f"Input Features and Predicted {target}")
+                ax.set_title(f"Input Numeric Features and Predicted {target}")
                 ax.grid(True)
 
-                for i, txt in enumerate(copy_feat_name):
-                    ax.annotate(f'{txt:.2f}', (copy_feat_name[i]), textcoords='offset point',
-                                xytext=(0, 10), ha='center')
+                for i, txt in enumerate(numeric_feature_values + [predicted_val[0]]):
+                    ax.annotate(f'{txt:.2f}', (i, txt),
+                                textcoords="offset points", xytext=(0, 10), ha='center')
 
                 st.pyplot(fig)
-    else:
-            st.write("Please select predictors")

@@ -1,0 +1,557 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from scipy.stats import pearsonr, stats, f_oneway
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import joblib
+
+try:
+    from xgboost import XGBRegressor
+
+    xgboost_available = True
+except ImportError:
+    xgboost_available = False
+
+
+# Caching
+@st.cache_data
+def scale_data(X_train, X_test):
+    scaler = StandardScaler()
+    X_train_scale = scaler.fit_transform(X_train)
+    X_test_scale = scaler.transform(X_test)
+    return scaler, X_train_scale, X_test_scale
+
+
+@st.cache_resource
+def train_models(X_train, y_train):
+    models = {
+        "LinearRegression": LinearRegression(),
+        "KNeighborsRegressor": KNeighborsRegressor(),
+        "DecisionTreeRegressor": DecisionTreeRegressor(),
+    }
+
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+
+    return models
+
+
+# Data cleaning
+def clean_dataset(data):
+    for col in data.select_dtypes(include=['object']).columns:
+        data[col] = data[col].apply(lambda x: pd.to_numeric(x, errors='ignore') if isinstance(x, str) else x)
+
+    for col in data.select_dtypes(include=['object']).columns:
+        try:
+            data[col] = pd.to_datetime(data[col], errors='ignore')
+        except:
+            pass
+
+    data = data.infer_objects()
+    return data
+
+
+# Dataset Upload
+st.sidebar.title("Upload Dataset")
+uploaded_files = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+
+if uploaded_files is not None:
+    # Read and clean the uploaded dataset
+    data = pd.read_csv(uploaded_files)
+    data_cleaned = data.drop_duplicates()
+
+    st.title("Medical Insurance Dataset Analysis")
+
+    # Step 1
+    st.write("### Sample Data from the Dataset")
+    st.write("Step 1 produces a display sample of the dataset and cleans the data set as well."
+             "This ensures that the dataset does not contain any unnecessary columns and provides a"
+             "quick glance at random samples to verify the data's integrity.")
+    st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+    if "Unnamed: 0" in data_cleaned.columns:
+        data_cleaned = data_cleaned.drop(columns=["Unnamed: 0"])
+        st.write("Dropped 'Unnamed: 0' column from the dataset.")
+        st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+    st.write("### Dataset Information")
+    st.write(f"### Shape: `{data_cleaned.shape}`")
+    st.write("Columns in the dataset:", data_cleaned.columns.tolist())
+
+    # Step 2 Problem Definition
+    target = 'charges'
+    st.write(f"### Target Variable: `{target}`")
+    st.write(f"This step defines the target variable in the dataset. By defining the target variable, the script sets the stage for modelling or predicitve analysis that will follow.")
+
+
+    # Step 3
+    st.write(f"""Within step 3 we are able to visualise the distribution of the target variable.
+    The visulatisation provides insight into how the target variable is spread, whether it is skewed or the presence of outliers.
+    The histogram visulaisation will help understand the distribution and aid in model selection and interpretation.""")
+    fig, ax = plt.subplots()
+    ax.hist(data_cleaned[target], bins=30, edgecolor='k', alpha=0.7)
+    ax.set_title(f"Distribution of {target}")
+    ax.set_xlabel(target)
+    ax.set_ylabel('Frequency')
+    st.pyplot(fig)
+
+    # Step 4
+    st.write("## Step 4: Data Exploration")
+    st.write("""This step sets up two column to facilitate further exploration, by dividing up the variables into two categories:
+    Continuous and Categorical.
+    When seperating the variables like this, it helps prepare for a more targeted analysis of the dataset, 
+    Therefore allowing the appropriate visualisation techniques to be applied to each type of variable.""")
+    col1, col2 = st.columns(2)
+
+    # Step 5: Visual Exploratory Data Analysis (EDA)
+    st.write("## Step 5: Visual Exploratory Data Analysis (EDA)")
+    st.write(F"""This step performs a visual EDA on both the seperated variables. 
+    Bar plots are created for categorical variables and histograms for continuous variables.
+    This allows for a thorough visual analysis of both variables, providing insights to patterns or anomalies within the dataset.
+    This step is crucial to be able to understand the relationships within the data, identify trends and determine if preprocessing steps are needed
+    before modeling.""")
+
+    continue_columns = data_cleaned.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    categorical_columns = data_cleaned.select_dtypes(include=['object']).columns.tolist()
+
+    # Visualizing Categorical Variables using Bar Plots
+    st.write("## Categorical Variables: Bar Plots")
+    for col in categorical_columns:
+        fig, ax = plt.subplots()
+        sns.countplot(x=data_cleaned[col], ax=ax)
+        ax.set_title(f"Distribution of {col}")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Count")
+        st.pyplot(fig)
+
+    # Visualizing Continuous Variables using Histograms
+    st.write("## Continuous Variables: Histograms")
+    for col in continue_columns:
+        fig, ax = plt.subplots()
+        ax.hist(data_cleaned[col], bins=30, alpha=0.7)
+        ax.set_title(f"Distribution of {col}")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Frequency")
+        st.pyplot(fig)
+
+    # Step 6: Outlier Analysis
+    st.write("## Step 6: Outlier Analysis")
+    st.write("""Step 6 allows us to identify and handle outliers within continuous variables. 
+    We used the IQR method to detect outliers for each continuous variable.
+    Pairplot is generated from the outlier clean dataset when the user clicks the checkbox option, this allows
+    for visualisation of the relationships between numeric variables.
+    This step further allows for detection of extreme values that would affect the accuracy of prediction models.""")
+
+
+    # Identifying outliers using IQR (Interquartile Range) for continuous variables
+    def detect_outliers_iqr(df, column):
+        Q1 = df[column].quantile(0.25)
+        Q3 = df[column].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        return df[(df[column] < lower_bound) | (df[column] > upper_bound)]
+
+
+    # Remove outliers option
+    remove_outliers = st.checkbox("Remove outliers for continuous variables")
+
+    if remove_outliers:
+        for col in continue_columns:
+            outliers = detect_outliers_iqr(data_cleaned, col)
+            if not outliers.empty:
+                st.write(f"Outliers detected in {col}:")
+                st.dataframe(outliers, use_container_width=True)
+                # Remove outliers
+                data_cleaned = data_cleaned[
+                    ~((data_cleaned[col] < outliers[col].min()) | (data_cleaned[col] > outliers[col].max()))]
+                st.write(f"Outliers removed from {col}.")
+
+    else:
+        st.write("No outliers have been removed.")
+
+    # Show cleaned dataset
+    st.write("## Data after Outlier Analysis")
+    st.dataframe(data_cleaned.sample(5), use_container_width=True)
+
+    with col1:
+        st.write("### Data Types:")
+        dtype_df = pd.DataFrame(data_cleaned.dtypes, columns=["Data Type"]).reset_index().rename(
+            columns={"index": "Column Name"})
+        st.dataframe(dtype_df, use_container_width=True)
+
+    with col2:
+        st.write("### Summary Statistics:")
+        st.dataframe(data_cleaned.describe(), use_container_width=True)
+
+    # Pairplot
+    numeric_cols = data_cleaned.select_dtypes(include=['float64', 'int64']).columns
+    if len(numeric_cols) > 1:
+        st.write("## Pairplot of Numeric Variables")
+        sns.pairplot(data_cleaned[numeric_cols])
+        st.pyplot(plt.gcf())
+    else:
+        st.write("Not enough numeric variables for a pairplot.")
+
+    # Step 7: Missing Values Analysis
+    if uploaded_files is not None:
+        st.write("## Step 7: Missing Values Analysis")
+        st.write("""This step identifys and handles missing values in the dataset.
+        If missing values are detected when the script is run, the user is informed and options for handling these values presented.
+        Missing data would severely affect machine learning models and statistical analysis.""")
+
+    # Show missing values for each column
+    missing_values = data_cleaned.isnull().sum()
+    missing_values = missing_values[missing_values > 0]  # Filter columns with missing values
+    st.write("## Columns with missing values: ")
+    st.dataframe(missing_values, use_container_width=True)
+    if not missing_values.empty:
+        st.write("## Options for handling missing values:")
+
+    else:
+        st.write("No missing values detected in the dataset.")
+
+    # Step 8 Feature Selection
+    st.write("## Step 8: Feature Selection - Correlation Analysis")
+    st.write("""Analyze correlations between the target variable (charges) and continuous predictors, 
+    as well as relationships between categorical variables and charges.
+    For each continuous predictor (like age, bmi, etc.), a scatter plot is generated to visualize the relationship with the target variable charges. 
+    The Pearson correlation coefficient is also calculated to quantify the strength and direction of the relationship.
+    Box plots are generated for each categorical predictor (sex, smoker, region) against charges to visualize the distribution of charges across different categories.
+    This step helps in identifying which features have a strong or weak relationship with the target variable charges. Features with a strong correlation can be useful in predictive modeling, 
+    while those with weak or no correlation might be excluded to simplify the model.
+    The correlation matrix helps visualize multicollinearity, which could indicate redundant features that should be removed or transformed to improve model performance.""")
+
+    if 'charges' in continue_columns:
+        continue_columns.remove('charges')
+
+    st.write("## Continuous Predictors vs Target Variable")
+
+    if continue_columns:
+        for col in continue_columns:
+            st.write(f"## {col} vs charges")
+
+            # Scatter
+            fig, ax = plt.subplots()
+            ax.scatter(data_cleaned[col], data_cleaned['charges'], alpha=0.7)
+            ax.set_title(f"{col} vs charges")
+            ax.set_xlabel(col)
+            ax.set_ylabel('charges')
+            st.pyplot(fig)
+
+            corr, _ = pearsonr(data_cleaned[col], data_cleaned['charges'])
+            st.write(f"Pearson correlation between `{col}` and `charges`: **{corr:.2f}**")
+    else:
+        st.write("No continous predictors found.")
+
+    st.write('## Categorical Predictors vs Target Variable (Box)')
+
+    if categorical_columns:
+        for col in categorical_columns:
+            st.write(f"## {col} vs charges")
+
+            # box
+            fig, ax = plt.subplots()
+            sns.boxplot(x=data_cleaned[col], y=data_cleaned['charges'], ax=ax)
+            ax.set_title(f'{col} vs charges')
+            ax.set_xlabel(col)
+            ax.set_ylabel('charges')
+            st.pyplot(fig)
+    else:
+        st.write("No categorical predictors found.")
+
+    # correlation matrix
+    st.write("## Correlation Matrix for Continuous Variables")
+    if continue_columns:
+        continue_corr_data = data_cleaned[continue_columns + ['charges']]
+        correlation_matrix = continue_corr_data.corr()
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', ax=ax)
+        st.pyplot(fig)
+
+        st.write("## Correlation Matrix:")
+        st.dataframe(correlation_matrix, use_container_width=True)
+
+        target_correlation = correlation_matrix['charges'].drop('charges')
+
+        st.write(f"## Correlation of Continuous Target Variable:")
+        st.dataframe(target_correlation, use_container_width=True)
+
+        strong_corr = target_correlation[target_correlation.abs() >= 0.7]
+        mod_corr = target_correlation[target_correlation.abs() >= 0.3] & (target_correlation.abs() <= 0.5)
+        weak_corr = target_correlation[target_correlation.abs() < 0.3]
+
+        st.write("## Strong Correlation:")
+        st.dataframe(strong_corr, use_container_width=True)
+        st.write("## Moderarte Correlation:")
+        st.dataframe(mod_corr, use_container_width=True)
+        st.write("## Weak Correlation:")
+        st.dataframe(weak_corr, use_container_width=True)
+    else:
+        st.write("No continuous columns availble for correlation")
+
+    # Step 9 (ANOVA Test)
+    st.write("## Step 9: Statistical Feature Selection (ANOVA Test)")
+    st.write("""Perform an Analysis of Variance (ANOVA) test to evaluate the relationship between categorical variables and the target variable.
+    For each selected categorical variable, an ANOVA test is conducted to assess whether there are statistically significant differences in the target variable (charges) across different categories. 
+    This results in an F-value (measuring the variance between groups) and a P-value (testing the null hypothesis).
+    This step helps identify whether any categorical variables have a statistically significant impact on the target variable (charges). Significant variables can be useful in predictive modeling, 
+    as they explain variance in the target.""")
+    if categorical_columns:
+        select_categorical = st.multiselect("Select categorical variables", categorical_columns)
+        target = 'charges'
+        if pd.api.types.is_numeric_dtype(data_cleaned[target]):
+            anova_results = []
+            for cat_col in select_categorical:
+                anova_group = [group for name, group in data_cleaned.groupby(cat_col)[target]]
+                f_val, p_val = stats.f_oneway(*anova_group)
+                anova_results.append({"Categorical Variable": cat_col, "F-Value": f_val, "P-Value": p_val})
+
+            anova_df = pd.DataFrame(anova_results)
+            st.write("### ANOVA Results")
+            st.write("Table shows F-values and P-values for each categorical variable")
+            st.dataframe(anova_df, use_container_width=True)
+
+            # Filter significant variables
+            if 'P-Value' in anova_df.columns:
+                significant_vars = anova_df[anova_df['P-Value'] < 0.05]
+                st.write("### Significant Variables (p < 0.05)")
+                if not significant_vars.empty:
+                    st.dataframe(significant_vars, use_container_width=True)
+                else:
+                    st.write("No significant variables")
+
+                st.write("## Categorical Variables vs Target Variable")
+                for cat_col in select_categorical:
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    sns.boxplot(x=cat_col, y=target, data=data_cleaned, ax=ax)
+                    ax.set_title(f"{cat_col} vs {target}")
+                    st.pyplot(fig)
+            else:
+                st.write("Target Variable must be continuous for analysis")
+        else:
+            st.write("no categorical variables for analysis")
+
+    # Step 10 Final Predictors
+    st.write("## Step 10: Final Predictor Selections")
+    st.write("""All columns of the dataset are displayed, allowing the user to manually select which features 
+    (both categorical and continuous) they want to include in the model.
+    This step enables the user to narrow down the features they deem important for the model based on prior analysis.""")
+
+    all_columns = data_cleaned.columns.tolist()
+    selected_features = st.multiselect("Select Variables", all_columns)
+
+    target = 'charges'
+    st.write("## Target Variable: `charges`")
+
+    if selected_features:
+        st.write("## Selcted Features:", selected_features)
+
+        # Step 11 data conversion
+        st.write("## Coversion to Numeric Values")
+        st.write("""The selected features are transformed into a numeric format by applying one-hot encoding, 
+        which creates binary variables for each category of the categorical features.
+        Machine learning algorithms generally require numerical input, so this step is critical in converting categorical data into a usable format. 
+        One-hot encoding ensures that categorical variables can be included in the model without introducing ordinal bias.""")
+
+        X = data_cleaned[selected_features]
+        y = data_cleaned[target]
+
+        X = pd.get_dummies(X, drop_first=True)
+
+        st.write("## Transformed Features")
+        st.dataframe(X.head())
+
+        # Step 12 Data Split / Standardization of Data
+        st.write("## Step 12: Train/Test Data and Standardization/Normalization")
+        st.write("""The dataset is split into training and testing sets based on a user-defined test size (e.g., 20% for testing, 80% for training).
+        An option is provided to standardize the data using StandardScaler, which scales the features to have a mean of 0 and a standard deviation of 1. If selected, 
+        the training and testing sets are transformed accordingly, and their shapes are displayed.
+        The train/test split ensures that a portion of the data is set aside for model evaluation, 
+        preventing overfitting and allowing for an unbiased assessment of model performance.""")
+
+        test_size = st.slider("Select Test Size in Percent", min_value=0.1, max_value=0.5, value=0.2, step=0.05)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+
+        scale_data_flag = st.checkbox("Apply Standardization")
+
+        if scale_data_flag:
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            st.write(f'Train Set Shape: {X_train_scaled.shape}')
+            st.write(f'Test Set Shape: {X_test_scaled.shape}')
+            X_full = pd.get_dummies(X, drop_first=True)
+
+            # Step 13 Regression Algorithms
+            st.write("## Step 13: Multiple Regression Algorithms")
+            st.write("""The code provides a selection of regression algorithms, 
+            including LinearRegression, DecisionTreeRegressor, KNNRegressor, AdaBoostRegressor, and RandomForestRegressor. If available, XGBoostRegressor is also included.
+            Each model is trained on the standardized training data (X_train_scaled and y_train) and then tested on the testing data (X_test_scaled). 
+            The performance of each model is evaluated using three metrics:
+            Mean Squared Error (MSE): Measures the average squared difference between the predicted and actual values. Lower values indicate better performance.
+            R-Squared (R²): Indicates the proportion of variance in the target variable explained by the model. Values closer to 1 signify better fit.
+            Mean Absolute Error (MAE): Measures the average absolute difference between the predicted and actual values. Like MSE, lower values indicate better performance.
+            his step allows for a direct comparison of multiple machine learning algorithms to determine which one performs best on the dataset. By using multiple metrics (MSE, R², and MAE), it provides a more comprehensive view of each model’s performance, 
+            ensuring that the best model is selected based on a balance of different evaluation criteria.""")
+
+            algorithm = {
+                "LinearRegression": LinearRegression(),
+                "DecisionTreeRegressor": DecisionTreeRegressor(),
+                "KNNRegressor": KNeighborsRegressor(),
+                "AdaBoostRegressor": AdaBoostRegressor(n_estimators=50),
+                "RandomForestRegressor": RandomForestRegressor(n_estimators=100),
+            }
+
+            if xgboost_available:
+                algorithm["XGBoostRegressor"] = XGBoostRegressor()
+
+            model_perform = {}
+
+            for name, model in algorithm.items():
+                model.fit(X_train_scaled, y_train)
+                y_pred = model.predict(X_test_scaled)
+
+                mse = mean_squared_error(y_test, y_pred)
+                r2 = r2_score(y_test, y_pred)
+                mae = mean_absolute_error(y_test, y_pred)
+
+                model_perform[name] = {"MSE": mse, "R2": r2, "MAE": mae}
+            else:
+                X_train_scaled, X_test_scaled = X_train, X_test
+                st.write(f'Train Set Shape: {X_train.shape}, Test Set Shape: {X_test.shape}')
+
+            perform_df = pd.DataFrame(model_perform).T
+
+            st.write("## Model Performance")
+            st.dataframe(perform_df, use_container_width=True)
+
+            # Step 14 Best Model
+            st.write("## Step 14: Selection of Best Model")
+            st.write("""The best model is selected based on the highest R² score, indicating the model that explains the most variance in the target variable (charges). The name of the best model and its R² score are displayed.
+            A visual comparison of model performance is provided, using bar plots for MSE, R², and MAE values across all models.
+            This step helps in finalizing the model for use in future predictions. By selecting the model with the highest R² score, it ensures that the chosen model has the best fit for the data.""")
+
+            best_model_name = perform_df["R2"].idxmax()
+            best_r2_score = perform_df["R2"].max()
+
+            st.write(f"## Best Model Selected: {best_model_name}")
+            st.write(f"## Best R2 Score: {best_r2_score:.2f}")
+
+            st.write("## Visual Model Performance Comparison")
+
+            model_names = perform_df.index
+            mse_value = perform_df["MSE"]
+            r2_value = perform_df["R2"]
+            mae_value = perform_df["MAE"]
+
+            fig, ax = plt.subplots(3, 1, figsize=(10, 8))
+
+            ax[0].bar(model_names, mse_value, color='green')
+            ax[0].set_title('(MSE) Mean Squared Error')
+            ax[0].set_ylabel('MSE')
+
+            ax[1].bar(model_names, r2_value, color='blue')
+            ax[1].set_title('R2 Score')
+            ax[1].set_ylabel('R2')
+
+            ax[2].bar(model_names, mae_value, color='red')
+            ax[2].set_title('(MAE) Mean Absolute Error')
+            ax[2].set_ylabel('MAE')
+
+            plt.tight_layout()
+            st.pyplot(fig)
+
+            # Step 15: Deployment of the Best Model
+            st.write("## Step 15: Best Model Deployment for Production")
+
+            best_model = algorithm[best_model_name]
+
+            X_full = pd.get_dummies(X, drop_first=True)
+            X_full_scaled = scaler.fit_transform(X_full)
+            y_full = y
+
+            best_model.fit(X_full_scaled, y_full)
+
+            model_filename = "optimal_model.pkl"
+            joblib.dump(best_model, model_filename)
+            st.write(f"Best model `{best_model_name}` has been retrained and saved as `{model_filename}`")
+
+            # Load the saved
+            loaded_model = joblib.load(model_filename)
+
+            st.write("## Model Deployment: Provide Input Values")
+
+            # Separate numeric and categorical
+            categorical_columns = ['sex', 'smoker', 'region']  # Adjust based on your dataset
+            numeric_columns = [col for col in selected_features if col not in categorical_columns]
+
+            user_input = {}
+
+            for feature in numeric_columns:
+                user_input[feature] = st.number_input(f"Enter value for {feature}",
+                                                      value=float(data_cleaned[feature].mean()))
+
+            user_input['sex'] = st.selectbox("Select Sex", options=['male', 'female'])
+            user_input['smoker'] = st.selectbox("Are you a smoker?", options=['yes', 'no'])
+            user_input['region'] = st.selectbox("Select Region", options=data_cleaned['region'].unique())
+
+            if st.button("Predict"):
+                user_input_df = pd.DataFrame([user_input])
+                user_input_df['sex_male'] = 1 if user_input['sex'] == 'male' else 0
+                user_input_df['smoker_yes'] = 1 if user_input['smoker'] == 'yes' else 0
+                user_input_df = pd.get_dummies(user_input_df, columns=['region'], drop_first=True)
+
+                user_input_df = user_input_df.reindex(columns=X_full.columns, fill_value=0)
+                user_input_scaled = scaler.transform(user_input_df)
+                predicted_val = loaded_model.predict(user_input_scaled)
+
+                st.write(f"Predicted {target}: {predicted_val[0]:.2f}")
+
+                st.write("## Visualising Prediction and Input Feature Values")
+
+                fig, ax = plt.subplots()
+
+                # Get feature names
+                feature_names = list(user_input.keys())
+                feature_values = list(user_input.values())
+
+                numeric_feature_names = [f for f in feature_names if f in numeric_columns]
+                numeric_feature_values = [user_input[f] for f in numeric_feature_names]
+
+                ax.bar(numeric_feature_names, numeric_feature_values, color='lightblue', label='Feature Values')
+
+                ax.bar(['Predicted ' + target], [predicted_val[0]], color='green', label='Predicted Value')
+
+                ax.set_xlabel("Features")
+                ax.set_title(f"Input Numeric Features and Predicted {target}")
+                ax.legend()
+
+                # Display the bar plot
+                st.pyplot(fig)
+
+                fig, ax = plt.subplots(figsize=(10, 8))
+
+                ax.plot(numeric_feature_names + [f"Predicted {target}"],
+                        numeric_feature_values + [predicted_val[0]],
+                        marker='o', linestyle='-', color='blue', label='Feature and Predicted Values')
+
+                ax.set_xlabel("Numeric Features and Prediction")
+                ax.set_ylabel("Values")
+                ax.set_title(f"Input Numeric Features and Predicted {target}")
+                ax.grid(True)
+
+                for i, txt in enumerate(numeric_feature_values + [predicted_val[0]]):
+                    ax.annotate(f'{txt:.2f}', (i, txt),
+                                textcoords="offset points", xytext=(0, 10), ha='center')
+
+                st.pyplot(fig)
